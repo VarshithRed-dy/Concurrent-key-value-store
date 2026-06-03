@@ -1,6 +1,5 @@
 # Compiled executables
 echo
-kvstore
 *.out
 *.exe
 
