@@ -1,0 +1,18 @@
+# Compiled executables
+echo
+kvstore
+*.out
+*.exe
+
+# Object/build files
+*.o
+*.obj
+
+# CMake/build directories for later phases
+build/
+cmake-build-*/
+
+# Editor/OS junk
+.vscode/
+.idea/
+.DS_Store
