@@ -1,5 +1,6 @@
 # Compiled executables
-echo
+
+kvstore
 *.out
 *.exe
 
@@ -12,6 +13,7 @@ build/
 cmake-build-*/
 
 # Editor/OS junk
+documentation.md
 .vscode/
 .idea/
 .DS_Store
