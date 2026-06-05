@@ -15,12 +15,24 @@
 #include <condition_variable>
 #include <vector>
 
+#include <chrono>
+
+struct Entry{
+    std::string value;
+    std::chrono::steady_clock::time_point expires_at; // if set key will expire after expires_at seconds.
+    bool has_expiry;
+};
+
+std::unordered_map<std::string, Entry> store;
+std::mutex store_mutex;
+
 std::queue<int> client_queue;
 std::mutex queue_mutex;
 std::condition_variable queue_cv;
 
-std::unordered_map<std::string, std::string> store;
-std::mutex store_mutex;
+bool is_expired(const Entry& entry) {
+    return entry.has_expiry && std::chrono::steady_clock::now() > entry.expires_at;
+}
 
 std::string handle_command(std::string line){
     while(!line.empty() && (line.back() == '\r' || line.back() == '\n')){
@@ -38,20 +50,68 @@ std::string handle_command(std::string line){
         if (!value.empty() && value[0] == ' ') {
             value.erase(0, 1);
         }
-
-        store[key] = value;
+        
+        store[key] = Entry{value, std::chrono::steady_clock::time_point{}, false};
         return "+OK\n";
     }
     else if(command == "GET"){
         if(store.find(key) != store.end()){
-            return store[key] + "\n";
+            if(is_expired(store[key])){ // Lazy expiration, removed on next access
+                store.erase(key);
+                return "(nil)\n";
+            }
+            return store[key].value + "\n";
         }else return "(nil)\n";
     }
     else if(command == "DEL"){
         return std::to_string(store.erase(key)) + "\n";
     }
+    else if(command == "EXPIRE"){
+        int seconds;
+        iss >> seconds;
+        auto it = store.find(key);
+        if(it == store.end()){
+            return "0\n";
+        }
+        else if(is_expired(it->second)){ //it->second is the Entry object (store[key]).
+            store.erase(it);
+            return "0\n";
+        }
+        store[key].expires_at = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+        store[key].has_expiry = true;
+        return "1\n";
+    }
+    else if(command == "TTL"){
+        auto it = store.find(key);
+        if(it == store.end()){
+            return "-2\n";
+        }
+        if(!it->second.has_expiry){
+            return "-1\n";
+        }
+        auto now = std::chrono::steady_clock::now();
+        auto ttl = std::chrono::duration_cast<std::chrono::seconds>(it->second.expires_at - now);
 
+        return std::to_string(ttl.count()) + "\n";
+    }
     return "-ERR unknown command\n";
+}
+
+void expiry_loop() { // This creates a background thread that periodically checks for expired keys
+    while(true) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        auto now = std::chrono::steady_clock::now();
+        
+        std::lock_guard<std::mutex> lock(store_mutex);
+        for(auto it = store.begin(); it != store.end(); ){
+            if(it->second.has_expiry && it->second.expires_at <= now){
+                it = store.erase(it);
+            }else{
+                ++it;
+            }
+        }
+    }
 }
 
 void handle_client(int client_fd) {
@@ -105,6 +165,8 @@ int main() {
     listen(server_fd, 10); // 10 -> Maximum number of pending connections
 
     std::cout<<"Listening on 6380...\n";
+
+    std::thread(expiry_loop).detach();
     
     const int workers = 4;
     std::vector<std::thread> worker_threads;
