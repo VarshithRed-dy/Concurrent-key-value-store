@@ -1,8 +1,9 @@
 # Compiled executables
-
 kvstore
 *.out
 *.exe
+
+kvstore.snapshot
 
 # Object/build files
 *.o
